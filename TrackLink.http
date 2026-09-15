@@ -1,0 +1,6 @@
+@TrackLink_HostAddress = http://localhost:5258
+
+GET {{TrackLink_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
