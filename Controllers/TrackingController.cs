@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using TrackLink.DTOs;
 using TrackLink.Services;
+using TrackLink.Models;
 
 namespace TrackLink.Controllers;
 
@@ -26,7 +27,7 @@ public class TrackingController : ControllerBase
         return CreatedAtAction(
             nameof(GetByToken),
             new { token = tracking.Token },
-            tracking
+            ToResponse(tracking)
         );
     }
 
@@ -40,7 +41,7 @@ public class TrackingController : ControllerBase
             return NotFound();
         }
 
-        return Ok(tracking);
+        return Ok(ToResponse(tracking));
     }
 
     [HttpPut("{token}")]
@@ -59,7 +60,7 @@ public class TrackingController : ControllerBase
             return NotFound();
         }
 
-        return Ok(tracking);
+        return Ok(ToResponse(tracking));
     }
 
     [HttpDelete("{token}")]
@@ -74,4 +75,15 @@ public class TrackingController : ControllerBase
 
         return NoContent();
     }
+
+    private static TrackingResponse ToResponse(Tracking tracking)
+{
+    return new TrackingResponse
+    {
+        Token = tracking.Token,
+        Latitude = tracking.Latitude,
+        Longitude = tracking.Longitude,
+        UpdatedAt = tracking.UpdatedAt
+    };
+}
 }

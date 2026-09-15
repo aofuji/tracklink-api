@@ -11,4 +11,11 @@ public class AppDbContext : DbContext
     }
 
     public DbSet<Tracking> Trackings { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Tracking>()
+            .HasIndex(x => x.Token)
+            .IsUnique();
+    }
 }
