@@ -16,9 +16,9 @@ public class TrackingController : ControllerBase
     }
 
     [HttpPost]
-    public IActionResult Create(CreateTrackingRequest request)
+    public async Task<IActionResult> Create(CreateTrackingRequest request)
     {
-        var tracking = _trackingService.Create(
+        var tracking = await _trackingService.Create(
             request.Latitude,
             request.Longitude
         );
@@ -31,9 +31,9 @@ public class TrackingController : ControllerBase
     }
 
     [HttpGet("{token}")]
-    public IActionResult GetByToken(string token)
+    public async Task<IActionResult> GetByToken(string token)
     {
-        var tracking = _trackingService.GetByToken(token);
+        var tracking = await _trackingService.GetByToken(token);
 
         if (tracking == null)
         {
@@ -44,11 +44,11 @@ public class TrackingController : ControllerBase
     }
 
     [HttpPut("{token}")]
-    public IActionResult Update(
-    string token,
-    UpdateTrackingRequest request)
+    public async Task<IActionResult> Update(
+      string token,
+      UpdateTrackingRequest request)
     {
-        var tracking = _trackingService.Update(
+        var tracking = await _trackingService.Update(
             token,
             request.Latitude,
             request.Longitude
@@ -63,9 +63,9 @@ public class TrackingController : ControllerBase
     }
 
     [HttpDelete("{token}")]
-    public IActionResult Delete(string token)
+    public async Task<IActionResult> Delete(string token)
     {
-        var deleted = _trackingService.Delete(token);
+        var deleted = await _trackingService.Delete(token);
 
         if (!deleted)
         {

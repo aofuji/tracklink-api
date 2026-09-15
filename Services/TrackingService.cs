@@ -1,40 +1,49 @@
+using Microsoft.EntityFrameworkCore;
+using TrackLink.Data;
 using TrackLink.Models;
 
 namespace TrackLink.Services;
 
 public class TrackingService
 {
-    private readonly List<Tracking> _trackings = new();
+    private readonly AppDbContext _context;
 
-    private int _nextId = 1;
+    public TrackingService(AppDbContext context)
+    {
+        _context = context;
+    }
 
-    public Tracking Create(double latitude, double longitude)
+    public async Task<Tracking> Create(double latitude, double longitude)
     {
         var tracking = new Tracking
         {
-            Id = _nextId++,
             Token = Guid.NewGuid().ToString("N"),
             Latitude = latitude,
             Longitude = longitude,
             UpdatedAt = DateTime.UtcNow
         };
 
-        _trackings.Add(tracking);
+        _context.Trackings.Add(tracking);
+
+        await _context.SaveChangesAsync();
 
         return tracking;
     }
 
-    public Tracking? GetByToken(string token)
+    public async Task<Tracking?> GetByToken(string token)
     {
-        return _trackings.FirstOrDefault(x => x.Token == token);
+        return await _context.Trackings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Token == token);
     }
 
-    public Tracking? Update(
-    string token,
-    double latitude,
-    double longitude)
+    public async Task<Tracking?> Update(
+        string token,
+        double latitude,
+        double longitude)
     {
-        var tracking = _trackings.FirstOrDefault(x => x.Token == token);
+        var tracking = await _context.Trackings
+            .FirstOrDefaultAsync(x => x.Token == token);
 
         if (tracking == null)
         {
@@ -45,19 +54,24 @@ public class TrackingService
         tracking.Longitude = longitude;
         tracking.UpdatedAt = DateTime.UtcNow;
 
+        await _context.SaveChangesAsync();
+
         return tracking;
     }
 
-    public bool Delete(string token)
+    public async Task<bool> Delete(string token)
     {
-        var tracking = _trackings.FirstOrDefault(x => x.Token == token);
+        var tracking = await _context.Trackings
+            .FirstOrDefaultAsync(x => x.Token == token);
 
         if (tracking == null)
         {
             return false;
         }
 
-        _trackings.Remove(tracking);
+        _context.Trackings.Remove(tracking);
+
+        await _context.SaveChangesAsync();
 
         return true;
     }
