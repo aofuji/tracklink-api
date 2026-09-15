@@ -17,24 +17,30 @@ public class TrackingController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(CreateTrackingRequest request)
+    public async Task<IActionResult> CreateAsync(CreateTrackingRequest request, CancellationToken cancellationToken)
     {
-        var tracking = await _trackingService.Create(
+        var tracking = await _trackingService.CreateAsync(
             request.Latitude,
-            request.Longitude
+            request.Longitude,
+            cancellationToken
         );
 
         return CreatedAtAction(
-            nameof(GetByToken),
+            "GetByToken",
             new { token = tracking.Token },
             ToResponse(tracking)
         );
     }
 
     [HttpGet("{token}")]
-    public async Task<IActionResult> GetByToken(string token)
+    public async Task<IActionResult> GetByTokenAsync(
+    string token,
+    CancellationToken cancellationToken)
     {
-        var tracking = await _trackingService.GetByToken(token);
+        var tracking = await _trackingService.GetByTokenAsync(
+            token,
+            cancellationToken
+        );
 
         if (tracking == null)
         {
@@ -45,14 +51,16 @@ public class TrackingController : ControllerBase
     }
 
     [HttpPut("{token}")]
-    public async Task<IActionResult> Update(
+    public async Task<IActionResult> UpdateAsync(
       string token,
-      UpdateTrackingRequest request)
+      UpdateTrackingRequest request,
+      CancellationToken cancellationToken)
     {
-        var tracking = await _trackingService.Update(
+        var tracking = await _trackingService.UpdateAsync(
             token,
             request.Latitude,
-            request.Longitude
+            request.Longitude,
+            cancellationToken
         );
 
         if (tracking == null)
@@ -64,9 +72,9 @@ public class TrackingController : ControllerBase
     }
 
     [HttpDelete("{token}")]
-    public async Task<IActionResult> Delete(string token)
+    public async Task<IActionResult> DeleteAsync(string token, CancellationToken cancellationToken)
     {
-        var deleted = await _trackingService.Delete(token);
+        var deleted = await _trackingService.DeleteAsync(token, cancellationToken);
 
         if (!deleted)
         {
@@ -77,13 +85,13 @@ public class TrackingController : ControllerBase
     }
 
     private static TrackingResponse ToResponse(Tracking tracking)
-{
-    return new TrackingResponse
     {
-        Token = tracking.Token,
-        Latitude = tracking.Latitude,
-        Longitude = tracking.Longitude,
-        UpdatedAt = tracking.UpdatedAt
-    };
-}
+        return new TrackingResponse
+        {
+            Token = tracking.Token,
+            Latitude = tracking.Latitude,
+            Longitude = tracking.Longitude,
+            UpdatedAt = tracking.UpdatedAt
+        };
+    }
 }

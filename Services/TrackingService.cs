@@ -13,7 +13,7 @@ public class TrackingService
         _context = context;
     }
 
-    public async Task<Tracking> Create(double latitude, double longitude)
+    public async Task<Tracking> CreateAsync(double latitude, double longitude, CancellationToken cancellationToken)
     {
         var tracking = new Tracking
         {
@@ -25,25 +25,31 @@ public class TrackingService
 
         _context.Trackings.Add(tracking);
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return tracking;
     }
 
-    public async Task<Tracking?> GetByToken(string token)
+    public async Task<Tracking?> GetByTokenAsync(
+     string token,
+     CancellationToken cancellationToken)
     {
         return await _context.Trackings
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Token == token);
+            .FirstOrDefaultAsync(
+                x => x.Token == token,
+                cancellationToken
+            );
     }
 
-    public async Task<Tracking?> Update(
+    public async Task<Tracking?> UpdateAsync(
         string token,
         double latitude,
-        double longitude)
+        double longitude,
+        CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
-            .FirstOrDefaultAsync(x => x.Token == token);
+            .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
 
         if (tracking == null)
         {
@@ -54,15 +60,15 @@ public class TrackingService
         tracking.Longitude = longitude;
         tracking.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return tracking;
     }
 
-    public async Task<bool> Delete(string token)
+    public async Task<bool> DeleteAsync(string token, CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
-            .FirstOrDefaultAsync(x => x.Token == token);
+            .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
 
         if (tracking == null)
         {
@@ -71,7 +77,7 @@ public class TrackingService
 
         _context.Trackings.Remove(tracking);
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return true;
     }
