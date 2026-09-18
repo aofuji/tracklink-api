@@ -1,7 +1,8 @@
 using TrackLink.Models;
+
 namespace TrackLink.Services;
 
-public enum UpdateTrackingStatus
+public enum GetTrackingStatus
 {
     Success,
     NotFound,
@@ -9,9 +10,9 @@ public enum UpdateTrackingStatus
     Expired
 }
 
-public class UpdateTrackingResult
+public class GetTrackingResult
 {
-    public UpdateTrackingStatus Status { get; set; }
+    public GetTrackingStatus Status { get; set; }
 
     public Tracking? Tracking { get; set; }
 }

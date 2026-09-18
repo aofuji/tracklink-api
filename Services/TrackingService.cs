@@ -15,13 +15,16 @@ public class TrackingService
 
     public async Task<Tracking> CreateAsync(double latitude, double longitude, CancellationToken cancellationToken)
     {
+        var now = DateTime.UtcNow;
+
         var tracking = new Tracking
         {
             Token = Guid.NewGuid().ToString("N"),
             Latitude = latitude,
             Longitude = longitude,
-            UpdatedAt = DateTime.UtcNow,
-            IsActive = true
+            UpdatedAt = now,
+            IsActive = true,
+            ExpiresAt = now.AddHours(24)
         };
 
         _context.Trackings.Add(tracking);
@@ -31,16 +34,46 @@ public class TrackingService
         return tracking;
     }
 
-    public async Task<Tracking?> GetByTokenAsync(
+    public async Task<GetTrackingResult> GetByTokenAsync(
      string token,
      CancellationToken cancellationToken)
     {
-        return await _context.Trackings
+        var tracking = await _context.Trackings
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 x => x.Token == token,
                 cancellationToken
             );
+
+        if (tracking == null)
+        {
+            return new GetTrackingResult
+            {
+                Status = GetTrackingStatus.NotFound
+            };
+        }
+
+        if (!tracking.IsActive)
+        {
+            return new GetTrackingResult
+            {
+                Status = GetTrackingStatus.Inactive
+            };
+        }
+
+        if (tracking.ExpiresAt <= DateTime.UtcNow)
+        {
+            return new GetTrackingResult
+            {
+                Status = GetTrackingStatus.Expired
+            };
+        }
+
+        return new GetTrackingResult
+        {
+            Status = GetTrackingStatus.Success,
+            Tracking = tracking
+        };
     }
 
     public async Task<UpdateTrackingResult> UpdateAsync(
@@ -68,6 +101,14 @@ public class TrackingService
             return new UpdateTrackingResult
             {
                 Status = UpdateTrackingStatus.Inactive
+            };
+        }
+
+        if (tracking.ExpiresAt <= DateTime.UtcNow)
+        {
+            return new UpdateTrackingResult
+            {
+                Status = UpdateTrackingStatus.Expired
             };
         }
 

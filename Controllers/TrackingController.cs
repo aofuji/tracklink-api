@@ -34,20 +34,36 @@ public class TrackingController : ControllerBase
 
     [HttpGet("{token}")]
     public async Task<IActionResult> GetByTokenAsync(
-    string token,
-    CancellationToken cancellationToken)
+     string token,
+     CancellationToken cancellationToken)
     {
-        var tracking = await _trackingService.GetByTokenAsync(
+        var result = await _trackingService.GetByTokenAsync(
             token,
             cancellationToken
         );
 
-        if (tracking == null)
+        if (result.Status == GetTrackingStatus.NotFound)
         {
             return NotFound();
         }
 
-        return Ok(ToResponse(tracking));
+        if (result.Status == GetTrackingStatus.Inactive)
+        {
+            return Conflict(new
+            {
+                message = "Tracking session is inactive."
+            });
+        }
+
+        if (result.Status == GetTrackingStatus.Expired)
+        {
+            return StatusCode(StatusCodes.Status410Gone, new
+            {
+                message = "Tracking session has expired."
+            });
+        }
+
+        return Ok(ToResponse(result.Tracking!));
     }
 
     [HttpPut("{token}")]
@@ -76,6 +92,14 @@ public class TrackingController : ControllerBase
             });
         }
 
+        if (result.Status == UpdateTrackingStatus.Expired)
+        {
+            return Conflict(new
+            {
+                message = "Tracking session has expired."
+            });
+        }
+
         return Ok(ToResponse(result.Tracking!));
     }
 
@@ -100,7 +124,8 @@ public class TrackingController : ControllerBase
             Latitude = tracking.Latitude,
             Longitude = tracking.Longitude,
             UpdatedAt = tracking.UpdatedAt,
-            IsActive = tracking.IsActive
+            IsActive = tracking.IsActive,
+            ExpiresAt = tracking.ExpiresAt
         };
     }
 }
