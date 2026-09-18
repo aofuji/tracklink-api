@@ -91,7 +91,8 @@ public class TrackingController : ControllerBase
             Token = tracking.Token,
             Latitude = tracking.Latitude,
             Longitude = tracking.Longitude,
-            UpdatedAt = tracking.UpdatedAt
+            UpdatedAt = tracking.UpdatedAt,
+            IsActive = tracking.IsActive
         };
     }
 }

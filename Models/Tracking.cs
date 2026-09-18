@@ -11,4 +11,6 @@ public class Tracking
     public double Longitude { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    public bool IsActive { get; set; }
 }

@@ -20,7 +20,8 @@ public class TrackingService
             Token = Guid.NewGuid().ToString("N"),
             Latitude = latitude,
             Longitude = longitude,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            IsActive = true
         };
 
         _context.Trackings.Add(tracking);
@@ -43,13 +44,16 @@ public class TrackingService
     }
 
     public async Task<Tracking?> UpdateAsync(
-        string token,
-        double latitude,
-        double longitude,
-        CancellationToken cancellationToken)
+     string token,
+     double latitude,
+     double longitude,
+     CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
-            .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
+            .FirstOrDefaultAsync(
+                x => x.Token == token && x.IsActive,
+                cancellationToken
+            );
 
         if (tracking == null)
         {
@@ -65,17 +69,23 @@ public class TrackingService
         return tracking;
     }
 
-    public async Task<bool> DeleteAsync(string token, CancellationToken cancellationToken)
+    public async Task<bool> DeleteAsync(
+      string token,
+      CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
-            .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
+            .FirstOrDefaultAsync(
+                x => x.Token == token,
+                cancellationToken
+            );
 
         if (tracking == null)
         {
             return false;
         }
 
-        _context.Trackings.Remove(tracking);
+        tracking.IsActive = false;
+        tracking.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
 

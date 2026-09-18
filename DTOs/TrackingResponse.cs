@@ -9,4 +9,6 @@ public class TrackingResponse
     public double Longitude { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    public bool IsActive { get; set; }
 }
