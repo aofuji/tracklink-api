@@ -52,23 +52,31 @@ public class TrackingController : ControllerBase
 
     [HttpPut("{token}")]
     public async Task<IActionResult> UpdateAsync(
-      string token,
-      UpdateTrackingRequest request,
-      CancellationToken cancellationToken)
+     string token,
+     UpdateTrackingRequest request,
+     CancellationToken cancellationToken)
     {
-        var tracking = await _trackingService.UpdateAsync(
+        var result = await _trackingService.UpdateAsync(
             token,
             request.Latitude,
             request.Longitude,
             cancellationToken
         );
 
-        if (tracking == null)
+        if (result.Status == UpdateTrackingStatus.NotFound)
         {
             return NotFound();
         }
 
-        return Ok(ToResponse(tracking));
+        if (result.Status == UpdateTrackingStatus.Inactive)
+        {
+            return Conflict(new
+            {
+                message = "Tracking session is inactive."
+            });
+        }
+
+        return Ok(ToResponse(result.Tracking!));
     }
 
     [HttpDelete("{token}")]

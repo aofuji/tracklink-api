@@ -43,21 +43,32 @@ public class TrackingService
             );
     }
 
-    public async Task<Tracking?> UpdateAsync(
-     string token,
-     double latitude,
-     double longitude,
-     CancellationToken cancellationToken)
+    public async Task<UpdateTrackingResult> UpdateAsync(
+    string token,
+    double latitude,
+    double longitude,
+    CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
             .FirstOrDefaultAsync(
-                x => x.Token == token && x.IsActive,
+                x => x.Token == token,
                 cancellationToken
             );
 
         if (tracking == null)
         {
-            return null;
+            return new UpdateTrackingResult
+            {
+                Status = UpdateTrackingStatus.NotFound
+            };
+        }
+
+        if (!tracking.IsActive)
+        {
+            return new UpdateTrackingResult
+            {
+                Status = UpdateTrackingStatus.Inactive
+            };
         }
 
         tracking.Latitude = latitude;
@@ -66,7 +77,11 @@ public class TrackingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return tracking;
+        return new UpdateTrackingResult
+        {
+            Status = UpdateTrackingStatus.Success,
+            Tracking = tracking
+        };
     }
 
     public async Task<bool> DeleteAsync(
