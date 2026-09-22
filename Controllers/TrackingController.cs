@@ -5,6 +5,7 @@ using TrackLink.Models;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 
+
 namespace TrackLink.Controllers;
 
 [ApiController]
@@ -166,4 +167,31 @@ public class TrackingController : ControllerBase
             ExpiresAt = tracking.ExpiresAt
         };
     }
+
+    [Authorize]
+    [HttpGet("my")]
+    public async Task<IActionResult> GetMyTrackingsAsync(
+    CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirstValue(
+            ClaimTypes.NameIdentifier
+        );
+
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var trackings = await _trackingService.GetByUserIdAsync(
+            userId,
+            cancellationToken
+        );
+
+        var response = trackings
+            .Select(ToResponse)
+            .ToList();
+
+        return Ok(response);
+    }
+
 }

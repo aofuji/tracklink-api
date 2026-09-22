@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using TrackLink.DTOs;
 using TrackLink.Services;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace TrackLink.Controllers;
 
@@ -133,5 +135,21 @@ public class AuthController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    [Authorize]
+    [HttpGet("me")]
+    public IActionResult Me()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var name = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email);
+
+        return Ok(new
+        {
+            id = userId,
+            name,
+            email
+        });
     }
 }

@@ -150,4 +150,15 @@ public class TrackingService
 
         return true;
     }
+
+    public async Task<List<Tracking>> GetByUserIdAsync(
+    int userId,
+    CancellationToken cancellationToken)
+    {
+        return await _context.Trackings
+            .AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToListAsync(cancellationToken);
+    }
 }
