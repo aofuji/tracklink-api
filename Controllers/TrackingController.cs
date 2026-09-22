@@ -4,7 +4,8 @@ using TrackLink.Services;
 using TrackLink.Models;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
-
+using Microsoft.AspNetCore.SignalR;
+using TrackLink.Hubs;
 
 namespace TrackLink.Controllers;
 
@@ -14,9 +15,14 @@ public class TrackingController : ControllerBase
 {
     private readonly TrackingService _trackingService;
 
-    public TrackingController(TrackingService trackingService)
+    private readonly IHubContext<TrackingHub> _hubContext;
+
+    public TrackingController(
+     TrackingService trackingService,
+     IHubContext<TrackingHub> hubContext)
     {
         _trackingService = trackingService;
+        _hubContext = hubContext;
     }
 
     [Authorize]
@@ -123,14 +129,24 @@ public class TrackingController : ControllerBase
             });
         }
 
-        return Ok(ToResponse(result.Tracking!));
+        var response = ToResponse(result.Tracking!);
+
+        await _hubContext.Clients
+            .Group(token)
+            .SendAsync(
+                "LocationUpdated",
+                response,
+                cancellationToken
+            );
+
+        return Ok(response);
     }
 
     [Authorize]
     [HttpDelete("{token}")]
     public async Task<IActionResult> DeleteAsync(
-     string token,
-     CancellationToken cancellationToken)
+    string token,
+    CancellationToken cancellationToken)
     {
         var userIdClaim = User.FindFirstValue(
             ClaimTypes.NameIdentifier
@@ -151,6 +167,13 @@ public class TrackingController : ControllerBase
         {
             return NotFound();
         }
+
+        await _hubContext.Clients
+            .Group(token)
+            .SendAsync(
+                "TrackingEnded",
+                cancellationToken
+            );
 
         return NoContent();
     }
