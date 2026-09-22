@@ -16,4 +16,11 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="TrackLink.Tests\**" />
+    <Content Remove="TrackLink.Tests\**" />
+    <EmbeddedResource Remove="TrackLink.Tests\**" />
+    <None Remove="TrackLink.Tests\**" />
+  </ItemGroup>
+
 </Project>

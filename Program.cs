@@ -12,10 +12,13 @@ builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddSignalR();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection")
-    ));
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(
+            builder.Configuration.GetConnectionString("DefaultConnection")
+        ));
+}
 
 builder.Services.AddScoped<TrackingService>();
 builder.Services.AddScoped<AuthService>();
@@ -60,3 +63,7 @@ app.MapControllers();
 app.MapHub<TrackingHub>("/hubs/tracking");
 
 app.Run();
+
+public partial class Program
+{
+}
