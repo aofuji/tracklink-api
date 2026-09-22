@@ -13,7 +13,7 @@ public class TrackingService
         _context = context;
     }
 
-    public async Task<Tracking> CreateAsync(double latitude, double longitude, CancellationToken cancellationToken)
+    public async Task<Tracking> CreateAsync(double latitude, double longitude, int userId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
 
@@ -24,7 +24,8 @@ public class TrackingService
             Longitude = longitude,
             UpdatedAt = now,
             IsActive = true,
-            ExpiresAt = now.AddHours(24)
+            ExpiresAt = now.AddHours(24),
+            UserId = userId
         };
 
         _context.Trackings.Add(tracking);
@@ -77,14 +78,15 @@ public class TrackingService
     }
 
     public async Task<UpdateTrackingResult> UpdateAsync(
-    string token,
-    double latitude,
-    double longitude,
-    CancellationToken cancellationToken)
+      string token,
+      double latitude,
+      double longitude,
+      int userId,
+      CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
             .FirstOrDefaultAsync(
-                x => x.Token == token,
+                x => x.Token == token && x.UserId == userId,
                 cancellationToken
             );
 
@@ -126,12 +128,13 @@ public class TrackingService
     }
 
     public async Task<bool> DeleteAsync(
-      string token,
-      CancellationToken cancellationToken)
+     string token,
+     int userId,
+     CancellationToken cancellationToken)
     {
         var tracking = await _context.Trackings
             .FirstOrDefaultAsync(
-                x => x.Token == token,
+                x => x.Token == token && x.UserId == userId,
                 cancellationToken
             );
 

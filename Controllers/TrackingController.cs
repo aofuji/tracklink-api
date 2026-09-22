@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using TrackLink.DTOs;
 using TrackLink.Services;
 using TrackLink.Models;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 
 namespace TrackLink.Controllers;
 
@@ -16,12 +18,23 @@ public class TrackingController : ControllerBase
         _trackingService = trackingService;
     }
 
+    [Authorize]
     [HttpPost]
-    public async Task<IActionResult> CreateAsync(CreateTrackingRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateAsync(
+    CreateTrackingRequest request,
+    CancellationToken cancellationToken)
     {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized();
+        }
+
         var tracking = await _trackingService.CreateAsync(
             request.Latitude,
             request.Longitude,
+            userId,
             cancellationToken
         );
 
@@ -66,16 +79,25 @@ public class TrackingController : ControllerBase
         return Ok(ToResponse(result.Tracking!));
     }
 
+    [Authorize]
     [HttpPut("{token}")]
     public async Task<IActionResult> UpdateAsync(
-     string token,
-     UpdateTrackingRequest request,
-     CancellationToken cancellationToken)
+    string token,
+    UpdateTrackingRequest request,
+    CancellationToken cancellationToken)
     {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized();
+        }
+
         var result = await _trackingService.UpdateAsync(
             token,
             request.Latitude,
             request.Longitude,
+            userId,
             cancellationToken
         );
 
@@ -103,10 +125,26 @@ public class TrackingController : ControllerBase
         return Ok(ToResponse(result.Tracking!));
     }
 
+    [Authorize]
     [HttpDelete("{token}")]
-    public async Task<IActionResult> DeleteAsync(string token, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteAsync(
+     string token,
+     CancellationToken cancellationToken)
     {
-        var deleted = await _trackingService.DeleteAsync(token, cancellationToken);
+        var userIdClaim = User.FindFirstValue(
+            ClaimTypes.NameIdentifier
+        );
+
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var deleted = await _trackingService.DeleteAsync(
+            token,
+            userId,
+            cancellationToken
+        );
 
         if (!deleted)
         {
