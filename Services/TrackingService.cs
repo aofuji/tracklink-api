@@ -29,6 +29,13 @@ public class TrackingService
         };
 
         _context.Trackings.Add(tracking);
+        _context.TrackingLocations.Add(new TrackingLocation
+        {
+            Latitude = latitude,
+            Longitude = longitude,
+            RecordedAt = now,
+            Tracking = tracking
+        });
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -114,9 +121,19 @@ public class TrackingService
             };
         }
 
+        var now = DateTime.UtcNow;
+
         tracking.Latitude = latitude;
         tracking.Longitude = longitude;
-        tracking.UpdatedAt = DateTime.UtcNow;
+        tracking.UpdatedAt = now;
+
+        _context.TrackingLocations.Add(new TrackingLocation
+        {
+            Latitude = latitude,
+            Longitude = longitude,
+            RecordedAt = now,
+            TrackingId = tracking.Id
+        });
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -160,5 +177,35 @@ public class TrackingService
             .Where(x => x.UserId == userId)
             .OrderByDescending(x => x.UpdatedAt)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<GetTrackingHistoryResult> GetHistoryByTokenAsync(
+    string token,
+    CancellationToken cancellationToken)
+    {
+        var result = await GetByTokenAsync(
+            token,
+            cancellationToken
+        );
+
+        if (result.Status != GetTrackingStatus.Success)
+        {
+            return new GetTrackingHistoryResult
+            {
+                Status = result.Status
+            };
+        }
+
+        var locations = await _context.TrackingLocations
+            .AsNoTracking()
+            .Where(x => x.TrackingId == result.Tracking!.Id)
+            .OrderBy(x => x.RecordedAt)
+            .ToListAsync(cancellationToken);
+
+        return new GetTrackingHistoryResult
+        {
+            Status = GetTrackingStatus.Success,
+            Locations = locations
+        };
     }
 }

@@ -89,15 +89,11 @@ public class AuthService
     string refreshToken,
     CancellationToken cancellationToken)
     {
-        var tokenHash = Convert.ToHexString(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(refreshToken)
-            )
-        );
+        var tokenHash = HashRefreshToken(refreshToken);
 
         var token = new RefreshToken
         {
-            Token = tokenHash,
+            TokenHash = tokenHash,
             UserId = user.Id,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -109,56 +105,17 @@ public class AuthService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<User?> ValidateRefreshTokenAsync(
-    string refreshToken,
-    CancellationToken cancellationToken)
-    {
-        var tokenHash = Convert.ToHexString(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(refreshToken)
-            )
-        );
-
-        var storedToken = await _context.RefreshTokens
-            .Include(x => x.User)
-            .FirstOrDefaultAsync(
-                x => x.Token == tokenHash,
-                cancellationToken
-            );
-
-        if (storedToken == null)
-        {
-            return null;
-        }
-
-        if (storedToken.IsRevoked)
-        {
-            return null;
-        }
-
-        if (storedToken.ExpiresAt <= DateTime.UtcNow)
-        {
-            return null;
-        }
-
-        return storedToken.User;
-    }
-
     public async Task<User?> RotateRefreshTokenAsync(
     string refreshToken,
     string newRefreshToken,
     CancellationToken cancellationToken)
     {
-        var tokenHash = Convert.ToHexString(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(refreshToken)
-            )
-        );
+        var tokenHash = HashRefreshToken(refreshToken);
 
         var storedToken = await _context.RefreshTokens
             .Include(x => x.User)
             .FirstOrDefaultAsync(
-                x => x.Token == tokenHash,
+                x => x.TokenHash == tokenHash,
                 cancellationToken
             );
 
@@ -180,15 +137,11 @@ public class AuthService
         // O token antigo não poderá mais ser utilizado.
         storedToken.IsRevoked = true;
 
-        var newTokenHash = Convert.ToHexString(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(newRefreshToken)
-            )
-        );
+        var newTokenHash = HashRefreshToken(newRefreshToken);
 
         var newToken = new RefreshToken
         {
-            Token = newTokenHash,
+            TokenHash = newTokenHash,
             UserId = storedToken.UserId,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -206,15 +159,11 @@ public class AuthService
     string refreshToken,
     CancellationToken cancellationToken)
     {
-        var tokenHash = Convert.ToHexString(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(refreshToken)
-            )
-        );
+        var tokenHash = HashRefreshToken(refreshToken);
 
         var storedToken = await _context.RefreshTokens
             .FirstOrDefaultAsync(
-                x => x.Token == tokenHash,
+                x => x.TokenHash == tokenHash,
                 cancellationToken
             );
 
@@ -233,5 +182,14 @@ public class AuthService
         await _context.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    private static string HashRefreshToken(string refreshToken)
+    {
+        return Convert.ToHexString(
+            SHA256.HashData(
+                Encoding.UTF8.GetBytes(refreshToken)
+            )
+        );
     }
 }
