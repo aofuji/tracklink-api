@@ -38,6 +38,7 @@ The project is under active development and is intended as a practical backend p
 - Entity Framework Core
 - Npgsql Entity Framework Core provider
 - PostgreSQL
+- Docker / Docker Compose
 - xUnit
 - Microsoft.AspNetCore.Mvc.Testing / WebApplicationFactory
 - SQLite in-memory for integration tests
@@ -276,6 +277,90 @@ Run the API:
 dotnet run
 ```
 
+## Running with Docker Compose
+
+The repository includes a Docker setup for running the API and PostgreSQL together.
+
+Start the complete backend environment:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+
+- `postgres`: PostgreSQL 16 database
+- `tracklink-migrate`: one-shot EF Core migration bundle
+- `tracklink-api`: ASP.NET Core API container
+
+The API is exposed on port `8080` by default:
+
+```text
+http://localhost:8080
+```
+
+The SignalR hub is available at:
+
+```text
+http://localhost:8080/hubs/tracking
+```
+
+Stop the containers:
+
+```bash
+docker compose down
+```
+
+Remove containers and the PostgreSQL data volume:
+
+```bash
+docker compose down -v
+```
+
+### Docker Configuration
+
+Docker-specific settings are supplied through environment variables using ASP.NET Core configuration conventions.
+
+Important variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `API_PORT` | `8080` | Host port mapped to the API container. |
+| `POSTGRES_DB` | `tracklink` | PostgreSQL database name. |
+| `POSTGRES_USER` | `tracklink` | PostgreSQL user. |
+| `POSTGRES_PASSWORD` | `tracklink` | PostgreSQL password. |
+| `POSTGRES_PORT` | `5432` | Host port mapped to PostgreSQL. |
+| `JWT_KEY` | development value | JWT signing key for the Docker environment. |
+| `JWT_ISSUER` | `TrackLink` | JWT issuer. |
+| `JWT_AUDIENCE` | `TrackLink` | JWT audience. |
+| `JWT_EXPIRATION_MINUTES` | `15` | Access token lifetime in minutes. |
+
+Inside Docker, the API connects to PostgreSQL through the Compose service name:
+
+```text
+Host=postgres
+```
+
+Do not use `localhost` for the database host from inside the API container.
+
+PostgreSQL data is stored in the named Docker volume:
+
+```text
+postgres_data
+```
+
+### Docker Migration Strategy
+
+The application does not run migrations automatically inside `Program.cs`.
+
+For Docker Compose, migrations are applied by the separate `tracklink-migrate` service using an EF Core migration bundle. The API waits for PostgreSQL to become healthy and for the migration service to complete successfully before starting.
+
+For non-Docker local development, continue using:
+
+```bash
+dotnet ef database update
+```
+
 ## Testing
 
 Integration tests are located in `TrackLink.Tests`.
@@ -312,6 +397,8 @@ TrackLink
 ├── TrackLink.Tests
 │   ├── TrackLinkApiFactory.cs
 │   └── TrackLinkIntegrationTests.cs
+├── Dockerfile
+├── docker-compose.yml
 ├── Program.cs
 └── TrackLink.csproj
 ```
@@ -323,7 +410,7 @@ TrackLink
 - JWT Bearer authentication protects user-specific and mutation endpoints.
 - Tracking mutations require ownership validation.
 - Public tracking access depends on possession of the shareable tracking token.
-- Production secrets, JWT keys, and database credentials should not be committed to source control.
+- Production secrets, JWT keys, and database credentials should be supplied through environment variables or a secret manager and should not be committed to source control.
 
 ## Project Status
 
@@ -333,7 +420,6 @@ TrackLink is still under development. Core authentication, tracking, history, re
 
 Possible future work:
 
-- Docker / Docker Compose workflow
 - PostgreSQL-backed integration tests with Testcontainers
 - Frontend application
 - Map visualization

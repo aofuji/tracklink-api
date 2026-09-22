@@ -17,5 +17,42 @@ services:
       timeout: 5s
       retries: 5
 
+  tracklink-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    container_name: tracklink-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "--connection"
+      - "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tracklink};Username=${POSTGRES_USER:-tracklink};Password=${POSTGRES_PASSWORD:-tracklink}"
+    restart: "no"
+
+  tracklink-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: tracklink-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tracklink-migrate:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-tracklink};Username=${POSTGRES_USER:-tracklink};Password=${POSTGRES_PASSWORD:-tracklink}
+      Jwt__Key: ${JWT_KEY:-TrackLink-Docker-Development-Key-Change-Me}
+      Jwt__Issuer: ${JWT_ISSUER:-TrackLink}
+      Jwt__Audience: ${JWT_AUDIENCE:-TrackLink}
+      Jwt__ExpirationMinutes: ${JWT_EXPIRATION_MINUTES:-15}
+    ports:
+      - "${API_PORT:-8080}:8080"
+
 volumes:
   postgres_data:
