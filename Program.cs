@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddSignalR();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services
     .AddMcpServer()
@@ -70,7 +71,8 @@ app.UseStaticFiles();
 
 app.MapControllers();
 app.MapHub<TrackingHub>("/hubs/tracking");
-app.MapMcp("/mcp");
+app.MapMcp("/mcp")
+    .RequireAuthorization();
 
 app.Run();
 

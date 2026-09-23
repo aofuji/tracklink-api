@@ -222,6 +222,70 @@ Implemented events:
 - `LocationUpdated`: sent to the token group after a successful owner update.
 - `TrackingEnded`: sent to the token group after the owner ends a tracking session.
 
+## MCP Integration
+
+The MCP server is available at:
+
+```text
+POST /mcp
+```
+
+The MCP endpoint requires JWT authentication:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+MCP uses HTTP transport. Clients should accept both JSON and Server-Sent Events responses, because MCP responses can use `text/event-stream`.
+
+Available tools:
+
+| Tool | Description |
+| --- | --- |
+| `ping` | Checks whether the MCP server is working. |
+| `who_am_i` | Returns information about the authenticated user. |
+| `get_tracking_status` | Receives `token` and returns the current tracking status/location. |
+| `get_tracking_history` | Receives `token` and returns the location history. |
+| `get_my_trackings` | Returns the tracking sessions owned by the authenticated user. |
+| `stop_tracking` | Receives `token`, ends a tracking session owned by the authenticated user, and emits the SignalR `TrackingEnded` event. |
+
+`get_my_trackings` and `stop_tracking` read the `userId` from the authenticated JWT claims. They do not accept a client-supplied `userId`.
+
+List MCP tools:
+
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
+  }'
+```
+
+Call `get_tracking_status`:
+
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "get_tracking_status",
+      "arguments": {
+        "token": "tracking-token"
+      }
+    }
+  }'
+```
+
 ## Database
 
 The application uses PostgreSQL with Entity Framework Core migrations.

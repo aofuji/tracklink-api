@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TrackLink.Data;
 using System.Text.Json;
+using Microsoft.AspNetCore.SignalR.Client;
 
 namespace TrackLink.Tests;
 
@@ -35,7 +36,7 @@ public class TrackLinkIntegrationTests
     }
 
     [Fact]
-    public async Task McpGetTrackingStatus_ShouldReturnExistingTracking()
+    public async Task McpStopTracking_ShouldSendTrackingEndedSignalR()
     {
         using var factory = new TrackLinkApiFactory();
 
@@ -47,7 +48,327 @@ public class TrackLinkIntegrationTests
             longitude: 25.5
         );
 
-        var mcpClient = factory.CreateClient();
+        var hubConnection = new HubConnectionBuilder()
+            .WithUrl(
+                new Uri(
+                    ownerClient.BaseAddress!,
+                    "/hubs/tracking"
+                ),
+                options =>
+                {
+                    options.HttpMessageHandlerFactory = _ =>
+                        factory.Server.CreateHandler();
+                })
+            .Build();
+
+        await hubConnection.StartAsync();
+
+        await hubConnection.InvokeAsync(
+            "JoinTracking",
+            tracking.Token
+        );
+
+        var trackingEnded =
+            new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+
+        hubConnection.On("TrackingEnded", () =>
+        {
+            trackingEnded.TrySetResult(true);
+        });
+
+        hubConnection.On("TrackingEnded", () =>
+            {
+                trackingEnded.TrySetResult(true);
+            });
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 8,
+            method = "tools/call",
+            @params = new
+            {
+                name = "stop_tracking",
+                arguments = new
+                {
+                    token = tracking.Token
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Authorization =
+            ownerClient.DefaultRequestHeaders.Authorization;
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await ownerClient.SendAsync(httpRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode
+        );
+
+        var completedTask = await Task.WhenAny(
+            trackingEnded.Task,
+            Task.Delay(TimeSpan.FromSeconds(5))
+        );
+
+        Assert.Same(
+            trackingEnded.Task,
+            completedTask
+        );
+
+        Assert.True(
+            await trackingEnded.Task
+        );
+
+        await hubConnection.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task McpWithoutJwt_ShouldReturnUnauthorized()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var client = factory.CreateClient();
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 7,
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-06-18",
+                capabilities = new { },
+                clientInfo = new
+                {
+                    name = "tracklink-tests",
+                    version = "1.0.0"
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await client.SendAsync(httpRequest);
+
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            response.StatusCode
+        );
+    }
+
+    [Fact]
+    public async Task McpGetMyTrackings_ShouldReturnOnlyAuthenticatedUsersTrackings()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var userAClient = await CreateAuthenticatedClientAsync(factory);
+        var userBClient = await CreateAuthenticatedClientAsync(factory);
+
+        var trackingA = await CreateTrackingAsync(
+            userAClient,
+            latitude: 10.5,
+            longitude: 20.5
+        );
+
+        var trackingB = await CreateTrackingAsync(
+            userBClient,
+            latitude: 30.5,
+            longitude: 40.5
+        );
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 6,
+            method = "tools/call",
+            @params = new
+            {
+                name = "get_my_trackings",
+                arguments = new { }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Authorization =
+            userAClient.DefaultRequestHeaders.Authorization;
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await userAClient.SendAsync(httpRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode
+        );
+
+        var content = await ReadMcpToolResultAsync(response);
+
+        Assert.Contains(trackingA.Token, content);
+        Assert.DoesNotContain(trackingB.Token, content);
+    }
+
+    [Fact]
+    public async Task McpStopTracking_NonOwnerShouldNotStopTracking()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var ownerClient = await CreateAuthenticatedClientAsync(factory);
+
+        var tracking = await CreateTrackingAsync(
+            ownerClient,
+            latitude: 15.5,
+            longitude: 25.5
+        );
+
+        var otherUserClient = await CreateAuthenticatedClientAsync(factory);
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 5,
+            method = "tools/call",
+            @params = new
+            {
+                name = "stop_tracking",
+                arguments = new
+                {
+                    token = tracking.Token
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Authorization =
+            otherUserClient.DefaultRequestHeaders.Authorization;
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await otherUserClient.SendAsync(httpRequest);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await ReadMcpToolResultAsync(response);
+
+        Assert.Contains("\"success\":false", content);
+
+        var trackingResponse = await ownerClient.GetAsync(
+    $"/api/tracking/{tracking.Token}"
+);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            trackingResponse.StatusCode
+        );
+
+        var trackingAfterAttempt =
+            await trackingResponse.Content.ReadFromJsonAsync<TrackingResponse>();
+
+        Assert.NotNull(trackingAfterAttempt);
+        Assert.True(trackingAfterAttempt.IsActive);
+    }
+
+    [Fact]
+    public async Task McpStopTracking_OwnerShouldStopTracking()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var ownerClient = await CreateAuthenticatedClientAsync(factory);
+
+        var tracking = await CreateTrackingAsync(
+            ownerClient,
+            latitude: 15.5,
+            longitude: 25.5
+        );
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 4,
+            method = "tools/call",
+            @params = new
+            {
+                name = "stop_tracking",
+                arguments = new
+                {
+                    token = tracking.Token
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Authorization =
+            ownerClient.DefaultRequestHeaders.Authorization;
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await ownerClient.SendAsync(httpRequest);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await ReadMcpToolResultAsync(response);
+
+        Assert.Contains("\"success\":true", content);
+    }
+
+    [Fact]
+    public async Task McpGetTrackingStatus_ShouldReturnExistingTracking()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var ownerClient = await CreateAuthenticatedClientAsync(factory);
+
+        var tracking = await CreateTrackingAsync(
+            ownerClient,
+            latitude: 15.5,
+            longitude: 25.5
+        );
 
         var request = new
         {
@@ -75,7 +396,7 @@ public class TrackLinkIntegrationTests
 
         httpRequest.Content = JsonContent.Create(request);
 
-        var response = await mcpClient.SendAsync(httpRequest);
+        var response = await ownerClient.SendAsync(httpRequest);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -91,8 +412,8 @@ public class TrackLinkIntegrationTests
     [Fact]
     public async Task McpInitialize_ShouldReturnSuccess()
     {
-        using var _factory = new TrackLinkApiFactory();
-        var client = _factory.CreateClient();
+        using var factory = new TrackLinkApiFactory();
+        var client = await CreateAuthenticatedClientAsync(factory);
 
         var request = new
         {
@@ -138,9 +459,9 @@ public class TrackLinkIntegrationTests
     [Fact]
     public async Task McpToolsList_ShouldExposeTrackingTools()
     {
-        using var _factory = new TrackLinkApiFactory();
+        using var factory = new TrackLinkApiFactory();
 
-        var client = _factory.CreateClient();
+        var client = await CreateAuthenticatedClientAsync(factory);
 
         var request = new
         {
