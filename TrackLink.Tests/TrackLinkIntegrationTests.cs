@@ -1,16 +1,20 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TrackLink.Data;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace TrackLink.Tests;
 
 public class TrackLinkIntegrationTests
 {
+    private const string RefreshTokenCookieName = "tracklink_refresh_token";
+
     private static async Task<string> ReadMcpToolResultAsync(
     HttpResponseMessage response)
     {
@@ -519,19 +523,77 @@ public class TrackLinkIntegrationTests
     }
 
     [Fact]
-    public async Task LoginWithValidCredentialsReturnsAccessTokenAndRefreshToken()
+    public async Task LoginWithValidCredentialsReturnsAccessTokenAndRefreshCookie()
     {
         using var factory = new TrackLinkApiFactory();
-        var client = factory.CreateClient();
+        var client = CreateClientWithoutCookies(factory);
         var email = UniqueEmail();
         var password = "P@ssw0rd!";
 
         await RegisterAsync(client, email, password);
 
-        var auth = await LoginAsync(client, email, password);
+        var session = await LoginAsync(client, email, password);
 
-        Assert.False(string.IsNullOrWhiteSpace(auth.AccessToken));
-        Assert.False(string.IsNullOrWhiteSpace(auth.RefreshToken));
+        Assert.False(string.IsNullOrWhiteSpace(session.AccessToken));
+        Assert.False(string.IsNullOrWhiteSpace(session.RefreshCookie));
+    }
+
+    [Fact]
+    public async Task LoginDoesNotReturnRefreshTokenInBody()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+        var email = UniqueEmail();
+        var password = "P@ssw0rd!";
+
+        await RegisterAsync(client, email, password);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new
+            {
+                Email = email,
+                Password = password
+            });
+
+        response.EnsureSuccessStatusCode();
+
+        var json = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync()
+        );
+
+        Assert.True(json.RootElement.TryGetProperty("accessToken", out var accessToken));
+        Assert.False(string.IsNullOrWhiteSpace(accessToken.GetString()));
+        Assert.False(json.RootElement.TryGetProperty("refreshToken", out _));
+    }
+
+    [Fact]
+    public async Task LoginSendsHttpOnlyRefreshCookie()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+        var email = UniqueEmail();
+        var password = "P@ssw0rd!";
+
+        await RegisterAsync(client, email, password);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new
+            {
+                Email = email,
+                Password = password
+            });
+
+        response.EnsureSuccessStatusCode();
+
+        var setCookie = GetRefreshSetCookieHeader(response);
+
+        Assert.Contains("HttpOnly", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=lax", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/api/auth", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("expires=", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("domain=", setCookie, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -748,77 +810,180 @@ public class TrackLinkIntegrationTests
     }
 
     [Fact]
-    public async Task ValidRefreshTokenCanGenerateNewAccessTokenAndRefreshToken()
+    public async Task RefreshWorksUsingCookieAndReturnsAccessTokenOnly()
     {
         using var factory = new TrackLinkApiFactory();
-        var client = factory.CreateClient();
-        var auth = await RegisterAndLoginAsync(client);
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
 
-        var rotated = await RefreshAsync(client, auth.RefreshToken);
+        SetRefreshCookie(client, session.RefreshCookie);
+
+        var rotated = await RefreshAsync(client);
 
         Assert.False(string.IsNullOrWhiteSpace(rotated.AccessToken));
-        Assert.False(string.IsNullOrWhiteSpace(rotated.RefreshToken));
-        Assert.NotEqual(auth.RefreshToken, rotated.RefreshToken);
+        Assert.False(string.IsNullOrWhiteSpace(rotated.RefreshCookie));
+        Assert.NotEqual(session.RefreshCookie, rotated.RefreshCookie);
     }
 
     [Fact]
-    public async Task AfterRotationOldRefreshTokenCannotBeReused()
+    public async Task RefreshDoesNotReturnRefreshTokenInBody()
     {
         using var factory = new TrackLinkApiFactory();
-        var client = factory.CreateClient();
-        var auth = await RegisterAndLoginAsync(client);
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
 
-        await RefreshAsync(client, auth.RefreshToken);
+        SetRefreshCookie(client, session.RefreshCookie);
+
+        var response = await client.PostAsync("/api/auth/refresh", null);
+
+        response.EnsureSuccessStatusCode();
+
+        var json = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync()
+        );
+
+        Assert.True(json.RootElement.TryGetProperty("accessToken", out var accessToken));
+        Assert.False(string.IsNullOrWhiteSpace(accessToken.GetString()));
+        Assert.False(json.RootElement.TryGetProperty("refreshToken", out _));
+    }
+
+    [Fact]
+    public async Task RefreshDoesNotUseRequestBodyToken()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
 
         var response = await client.PostAsJsonAsync(
             "/api/auth/refresh",
             new
             {
-                RefreshToken = auth.RefreshToken
+                RefreshToken = GetCookieValue(session.RefreshCookie)
             });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
-    public async Task LogoutRevokesRefreshToken()
+    public async Task RefreshRotationReplacesCookieAndRevokesPreviousToken()
     {
         using var factory = new TrackLinkApiFactory();
-        var client = factory.CreateClient();
-        var auth = await RegisterAndLoginAsync(client);
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
+        var previousRefreshCookie = session.RefreshCookie;
+
+        SetRefreshCookie(client, previousRefreshCookie);
+
+        var rotated = await RefreshAsync(client);
+
+        Assert.NotEqual(previousRefreshCookie, rotated.RefreshCookie);
+
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var refreshTokens = await context.RefreshTokens
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
+
+        Assert.Equal(2, refreshTokens.Count);
+        Assert.True(refreshTokens[0].IsRevoked);
+        Assert.False(refreshTokens[1].IsRevoked);
+
+        SetRefreshCookie(client, previousRefreshCookie);
+
+        var oldTokenResponse = await client.PostAsync("/api/auth/refresh", null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, oldTokenResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task RefreshWithoutCookieReturnsUnauthorized()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+
+        var response = await client.PostAsync("/api/auth/refresh", null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutUsesCookieAndExpiresRefreshCookie()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
+
+        SetRefreshCookie(client, session.RefreshCookie);
+
+        var response = await client.PostAsync("/api/auth/logout", null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var setCookie = GetRefreshSetCookieHeader(response);
+
+        Assert.Contains($"{RefreshTokenCookieName}=", setCookie);
+        Assert.Contains("expires=", setCookie, StringComparison.OrdinalIgnoreCase);
+
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var storedToken = await context.RefreshTokens.SingleAsync();
+
+        Assert.True(storedToken.IsRevoked);
+    }
+
+    [Fact]
+    public async Task LogoutDoesNotUseRequestBodyToken()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
 
         var response = await client.PostAsJsonAsync(
             "/api/auth/logout",
             new
             {
-                RefreshToken = auth.RefreshToken
+                RefreshToken = GetCookieValue(session.RefreshCookie)
             });
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
-    public async Task RevokedRefreshTokenCannotBeUsed()
+    public async Task RefreshAfterLogoutFails()
     {
         using var factory = new TrackLinkApiFactory();
-        var client = factory.CreateClient();
-        var auth = await RegisterAndLoginAsync(client);
+        var client = CreateClientWithoutCookies(factory);
+        var session = await RegisterAndLoginAsync(client);
 
-        var logoutResponse = await client.PostAsJsonAsync(
-            "/api/auth/logout",
-            new
-            {
-                RefreshToken = auth.RefreshToken
-            });
-        var refreshResponse = await client.PostAsJsonAsync(
-            "/api/auth/refresh",
-            new
-            {
-                RefreshToken = auth.RefreshToken
-            });
+        SetRefreshCookie(client, session.RefreshCookie);
+
+        var logoutResponse = await client.PostAsync("/api/auth/logout", null);
+
+        SetRefreshCookie(client, session.RefreshCookie);
+
+        var refreshResponse = await client.PostAsync("/api/auth/refresh", null);
 
         Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutWithoutCookieReturnsUnauthorized()
+    {
+        using var factory = new TrackLinkApiFactory();
+        var client = CreateClientWithoutCookies(factory);
+
+        var response = await client.PostAsync("/api/auth/logout", null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    private static HttpClient CreateClientWithoutCookies(TrackLinkApiFactory factory)
+    {
+        return factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = false
+        });
     }
 
     private static async Task<HttpResponseMessage> RegisterAsync(
@@ -836,7 +1001,7 @@ public class TrackLinkIntegrationTests
             });
     }
 
-    private static async Task<AuthResponse> RegisterAndLoginAsync(
+    private static async Task<AuthSession> RegisterAndLoginAsync(
         HttpClient client,
         string? email = null,
         string password = "P@ssw0rd!")
@@ -849,7 +1014,7 @@ public class TrackLinkIntegrationTests
         return await LoginAsync(client, email, password);
     }
 
-    private static async Task<AuthResponse> LoginAsync(
+    private static async Task<AuthSession> LoginAsync(
         HttpClient client,
         string email,
         string password)
@@ -868,19 +1033,15 @@ public class TrackLinkIntegrationTests
 
         Assert.NotNull(auth);
 
-        return auth;
+        return new AuthSession(
+            auth.AccessToken,
+            ExtractRefreshCookie(response)
+        );
     }
 
-    private static async Task<AuthResponse> RefreshAsync(
-        HttpClient client,
-        string refreshToken)
+    private static async Task<AuthSession> RefreshAsync(HttpClient client)
     {
-        var response = await client.PostAsJsonAsync(
-            "/api/auth/refresh",
-            new
-            {
-                RefreshToken = refreshToken
-            });
+        var response = await client.PostAsync("/api/auth/refresh", null);
 
         response.EnsureSuccessStatusCode();
 
@@ -888,7 +1049,48 @@ public class TrackLinkIntegrationTests
 
         Assert.NotNull(auth);
 
-        return auth;
+        return new AuthSession(
+            auth.AccessToken,
+            ExtractRefreshCookie(response)
+        );
+    }
+
+    private static void SetRefreshCookie(
+        HttpClient client,
+        string refreshCookie)
+    {
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie", refreshCookie);
+    }
+
+    private static string ExtractRefreshCookie(HttpResponseMessage response)
+    {
+        return GetRefreshSetCookieHeader(response).Split(';')[0];
+    }
+
+    private static string GetRefreshSetCookieHeader(HttpResponseMessage response)
+    {
+        Assert.True(
+            response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders),
+            "Expected response to include a Set-Cookie header."
+        );
+
+        var setCookie = Assert.Single(
+            setCookieHeaders,
+            x => x.StartsWith(
+                $"{RefreshTokenCookieName}=",
+                StringComparison.Ordinal
+            )
+        );
+
+        return setCookie;
+    }
+
+    private static string GetCookieValue(string cookie)
+    {
+        var separatorIndex = cookie.IndexOf('=');
+
+        return cookie[(separatorIndex + 1)..];
     }
 
     private static async Task<HttpClient> CreateAuthenticatedClientAsync(
@@ -982,9 +1184,11 @@ public class TrackLinkIntegrationTests
         return $"user-{Guid.NewGuid():N}@example.com";
     }
 
-    private sealed record AuthResponse(
+    private sealed record AuthSession(
         string AccessToken,
-        string RefreshToken);
+        string RefreshCookie);
+
+    private sealed record AuthResponse(string AccessToken);
 
     private sealed record TrackingResponse(
         string Token,

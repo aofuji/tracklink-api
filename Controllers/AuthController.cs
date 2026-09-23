@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using TrackLink.DTOs;
 using TrackLink.Services;
-using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
 
 namespace TrackLink.Controllers;
 
@@ -10,15 +12,21 @@ namespace TrackLink.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
+    private const string RefreshTokenCookieName = "tracklink_refresh_token";
+    private const string RefreshTokenCookiePath = "/api/auth";
+
     private readonly AuthService _authService;
     private readonly TokenService _tokenService;
+    private readonly IWebHostEnvironment _environment;
 
     public AuthController(
-    AuthService authService,
-    TokenService tokenService)
+        AuthService authService,
+        TokenService tokenService,
+        IWebHostEnvironment environment)
     {
         _authService = authService;
         _tokenService = tokenService;
+        _environment = environment;
     }
 
     [HttpPost("register")]
@@ -52,8 +60,8 @@ public class AuthController : ControllerBase
 
     [HttpPost("login")]
     public async Task<IActionResult> LoginAsync(
-      LoginRequest request,
-      CancellationToken cancellationToken)
+        LoginRequest request,
+        CancellationToken cancellationToken)
     {
         var user = await _authService.LoginAsync(
             request.Email,
@@ -70,7 +78,6 @@ public class AuthController : ControllerBase
         }
 
         var accessToken = _tokenService.GenerateAccessToken(user);
-
         var refreshToken = _tokenService.GenerateRefreshToken();
 
         await _authService.SaveRefreshTokenAsync(
@@ -79,22 +86,31 @@ public class AuthController : ControllerBase
             cancellationToken
         );
 
+        AppendRefreshTokenCookie(refreshToken);
+
         return Ok(new
         {
-            accessToken,
-            refreshToken
+            accessToken
         });
     }
 
     [HttpPost("refresh")]
-    public async Task<IActionResult> RefreshAsync(
-       RefreshTokenRequest request,
-       CancellationToken cancellationToken)
+    public async Task<IActionResult> RefreshAsync(CancellationToken cancellationToken)
     {
+        var refreshToken = GetRefreshTokenFromCookie();
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return Unauthorized(new
+            {
+                message = "Invalid or expired refresh token."
+            });
+        }
+
         var newRefreshToken = _tokenService.GenerateRefreshToken();
 
         var user = await _authService.RotateRefreshTokenAsync(
-            request.RefreshToken,
+            refreshToken,
             newRefreshToken,
             cancellationToken
         );
@@ -109,20 +125,29 @@ public class AuthController : ControllerBase
 
         var accessToken = _tokenService.GenerateAccessToken(user);
 
+        AppendRefreshTokenCookie(newRefreshToken);
+
         return Ok(new
         {
-            accessToken,
-            refreshToken = newRefreshToken
+            accessToken
         });
     }
 
     [HttpPost("logout")]
-    public async Task<IActionResult> LogoutAsync(
-    RefreshTokenRequest request,
-    CancellationToken cancellationToken)
+    public async Task<IActionResult> LogoutAsync(CancellationToken cancellationToken)
     {
+        var refreshToken = GetRefreshTokenFromCookie();
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return Unauthorized(new
+            {
+                message = "Invalid refresh token."
+            });
+        }
+
         var revoked = await _authService.RevokeRefreshTokenAsync(
-            request.RefreshToken,
+            refreshToken,
             cancellationToken
         );
 
@@ -133,6 +158,8 @@ public class AuthController : ControllerBase
                 message = "Invalid refresh token."
             });
         }
+
+        DeleteRefreshTokenCookie();
 
         return NoContent();
     }
@@ -151,5 +178,45 @@ public class AuthController : ControllerBase
             name,
             email
         });
+    }
+
+    private string? GetRefreshTokenFromCookie()
+    {
+        return Request.Cookies[RefreshTokenCookieName];
+    }
+
+    private void AppendRefreshTokenCookie(string refreshToken)
+    {
+        Response.Cookies.Append(
+            RefreshTokenCookieName,
+            refreshToken,
+            CreateRefreshTokenCookieOptions(includeExpiration: true)
+        );
+    }
+
+    private void DeleteRefreshTokenCookie()
+    {
+        Response.Cookies.Delete(
+            RefreshTokenCookieName,
+            CreateRefreshTokenCookieOptions(includeExpiration: false)
+        );
+    }
+
+    private CookieOptions CreateRefreshTokenCookieOptions(bool includeExpiration)
+    {
+        var options = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = _environment.IsProduction(),
+            SameSite = SameSiteMode.Lax,
+            Path = RefreshTokenCookiePath
+        };
+
+        if (includeExpiration)
+        {
+            options.Expires = DateTimeOffset.UtcNow.Add(AuthService.RefreshTokenLifetime);
+        }
+
+        return options;
     }
 }

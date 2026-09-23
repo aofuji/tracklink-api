@@ -9,6 +9,8 @@ namespace TrackLink.Services;
 
 public class AuthService
 {
+    public static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
+
     private readonly AppDbContext _context;
     private readonly PasswordHasher<User> _passwordHasher;
 
@@ -96,7 +98,7 @@ public class AuthService
             TokenHash = tokenHash,
             UserId = user.Id,
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime),
             IsRevoked = false
         };
 
@@ -144,7 +146,7 @@ public class AuthService
             TokenHash = newTokenHash,
             UserId = storedToken.UserId,
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime),
             IsRevoked = false
         };
 
