@@ -5,12 +5,21 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TrackLink.Hubs;
+using ModelContextProtocol.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddSignalR();
+
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport(options =>
+    {
+        options.SessionMode = HttpServerSessionMode.Stateless;
+    })
+    .WithToolsFromAssembly();
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -61,6 +70,7 @@ app.UseStaticFiles();
 
 app.MapControllers();
 app.MapHub<TrackingHub>("/hubs/tracking");
+app.MapMcp("/mcp");
 
 app.Run();
 

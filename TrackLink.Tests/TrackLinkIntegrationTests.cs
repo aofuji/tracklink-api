@@ -4,11 +4,174 @@ using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TrackLink.Data;
+using System.Text.Json;
 
 namespace TrackLink.Tests;
 
 public class TrackLinkIntegrationTests
 {
+    private static async Task<string> ReadMcpToolResultAsync(
+    HttpResponseMessage response)
+    {
+        var content = await response.Content.ReadAsStringAsync();
+
+        var dataLine = content
+            .Split('\n')
+            .First(line => line.StartsWith("data: "));
+
+        var jsonRpc = JsonDocument.Parse(
+            dataLine["data: ".Length..]
+        );
+
+        var text = jsonRpc.RootElement
+            .GetProperty("result")
+            .GetProperty("content")[0]
+            .GetProperty("text")
+            .GetString();
+
+        Assert.NotNull(text);
+
+        return text;
+    }
+
+    [Fact]
+    public async Task McpGetTrackingStatus_ShouldReturnExistingTracking()
+    {
+        using var factory = new TrackLinkApiFactory();
+
+        var ownerClient = await CreateAuthenticatedClientAsync(factory);
+
+        var tracking = await CreateTrackingAsync(
+            ownerClient,
+            latitude: 15.5,
+            longitude: 25.5
+        );
+
+        var mcpClient = factory.CreateClient();
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 3,
+            method = "tools/call",
+            @params = new
+            {
+                name = "get_tracking_status",
+                arguments = new
+                {
+                    token = tracking.Token
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await mcpClient.SendAsync(httpRequest);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await ReadMcpToolResultAsync(response);
+
+        Assert.Contains("\"status\":\"Success\"", content);
+        Assert.Contains(tracking.Token, content);
+        Assert.Contains("\"latitude\":15.5", content);
+        Assert.Contains("\"longitude\":25.5", content);
+        Assert.DoesNotContain("\"userId\"", content);
+    }
+
+    [Fact]
+    public async Task McpInitialize_ShouldReturnSuccess()
+    {
+        using var _factory = new TrackLinkApiFactory();
+        var client = _factory.CreateClient();
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-06-18",
+                capabilities = new { },
+                clientInfo = new
+                {
+                    name = "tracklink-tests",
+                    version = "1.0.0"
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await client.SendAsync(httpRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode
+        );
+
+        var content = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("\"jsonrpc\":\"2.0\"", content);
+        Assert.Contains("\"serverInfo\"", content);
+    }
+
+    [Fact]
+    public async Task McpToolsList_ShouldExposeTrackingTools()
+    {
+        using var _factory = new TrackLinkApiFactory();
+
+        var client = _factory.CreateClient();
+
+        var request = new
+        {
+            jsonrpc = "2.0",
+            id = 2,
+            method = "tools/list",
+            @params = new { }
+        };
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/mcp"
+        );
+
+        httpRequest.Headers.Accept.ParseAdd(
+            "application/json, text/event-stream"
+        );
+
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await client.SendAsync(httpRequest);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("\"get_tracking_status\"", content);
+        Assert.Contains("\"get_tracking_history\"", content);
+        Assert.Contains("\"ping\"", content);
+    }
+
     [Fact]
     public async Task RegisteringValidUserReturnsSuccess()
     {
