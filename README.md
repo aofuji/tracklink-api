@@ -11,8 +11,8 @@ The project is under active development and is intended as a practical backend p
 - User registration and login
 - JWT Bearer authentication
 - Short-lived access tokens
-- Refresh tokens with rotation and revocation
-- Logout through refresh token revocation
+- Refresh tokens delivered through an HttpOnly cookie, with rotation and revocation
+- Logout through refresh token revocation and cookie removal
 - Password hashing
 - Refresh token SHA-256 hashing before database storage
 - Authenticated tracking session creation
@@ -83,17 +83,26 @@ User
 1. A user registers with name, email, and password.
 2. The password is hashed before being stored.
 3. The user logs in with email and password.
-4. The API returns:
-   - an access token used as a Bearer JWT for protected endpoints
-   - a refresh token used to obtain a new token pair
-5. Access tokens are short-lived.
-6. Refresh tokens are stored in the database as SHA-256 hashes, not as raw tokens.
-7. Refreshing a token rotates it:
-   - the current refresh token is revoked
-   - a new refresh token is generated
-   - only the new refresh token hash is stored
-8. Reusing a revoked refresh token fails.
-9. Logout revokes the submitted refresh token.
+4. The API returns only an access token in the response body.
+5. The refresh token is sent in the `tracklink_refresh_token` cookie. It is not returned in JSON.
+6. Access tokens are short-lived JWT Bearer tokens.
+7. Refresh tokens are stored in the database only as SHA-256 hashes, never as raw token values.
+8. Refreshing uses the cookie, rotates the refresh token, revokes the previous token, stores only the new token hash, replaces the cookie, and returns only a new access token in the response body.
+9. Reusing a revoked refresh token fails.
+10. Logout uses the cookie, revokes the matching refresh token, and removes/expires the cookie.
+
+Refresh cookie attributes:
+
+- Name: `tracklink_refresh_token`
+- `HttpOnly=true`
+- `SameSite=Lax`
+- `Path=/api/auth`
+- `Domain` is not explicitly set
+- Cookie expiration follows the refresh token expiration
+- `Secure=true` in production
+- In local HTTP development, `Secure` may be `false`
+
+Frontend clients do not send refresh tokens in JSON. Browser clients should send credentials when calling login, refresh, and logout so the cookie can be stored and sent.
 
 ## Tracking Flow
 
@@ -115,7 +124,7 @@ Public viewer follows current location and history using the token
 Owner can end the tracking session
 ```
 
-Tracking sessions can also expire. Expired or inactive sessions cannot be updated, and public access returns the existing unavailable-session responses.
+Tracking sessions expire 24 hours after creation. Expired or inactive sessions cannot be updated. Public tracking access returns `404 Not Found` for unknown tokens, `409 Conflict` for inactive sessions, and `410 Gone` for expired sessions. Authenticated updates return `404 Not Found` when the token does not belong to the authenticated user.
 
 ## API Endpoints
 
@@ -124,9 +133,9 @@ Tracking sessions can also expire. Expired or inactive sessions cannot be update
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/register` | Public | Register a new user. |
-| `POST` | `/api/auth/login` | Public | Login and receive an access token and refresh token. |
-| `POST` | `/api/auth/refresh` | Public | Rotate a valid refresh token and receive a new token pair. |
-| `POST` | `/api/auth/logout` | Public | Revoke a refresh token. |
+| `POST` | `/api/auth/login` | Public | Login, receive an access token in the body, and receive the refresh token as an HttpOnly cookie. |
+| `POST` | `/api/auth/refresh` | Public | Rotate the refresh token from the cookie and receive a new access token in the body. |
+| `POST` | `/api/auth/logout` | Public | Revoke the refresh token from the cookie and remove/expire the cookie. |
 | `GET` | `/api/auth/me` | Bearer JWT | Return claims for the authenticated user. |
 
 ### Tracking
@@ -165,6 +174,51 @@ Content-Type: application/json
   "email": "user@example.com",
   "password": "P@ssw0rd!"
 }
+```
+
+Successful login response:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: tracklink_refresh_token=<refresh-token>; expires=<date>; path=/api/auth; samesite=lax; httponly
+Content-Type: application/json
+
+{
+  "accessToken": "<jwt-access-token>"
+}
+```
+
+Refresh access token:
+
+```http
+POST /api/auth/refresh
+Cookie: tracklink_refresh_token=<refresh-token>
+```
+
+Successful refresh response:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: tracklink_refresh_token=<new-refresh-token>; expires=<date>; path=/api/auth; samesite=lax; httponly
+Content-Type: application/json
+
+{
+  "accessToken": "<new-jwt-access-token>"
+}
+```
+
+Logout:
+
+```http
+POST /api/auth/logout
+Cookie: tracklink_refresh_token=<refresh-token>
+```
+
+Successful logout response:
+
+```http
+HTTP/1.1 204 No Content
+Set-Cookie: tracklink_refresh_token=; expires=<past-date>; path=/api/auth
 ```
 
 Create tracking:
@@ -219,8 +273,8 @@ Clients call `JoinTracking(token)` to join a SignalR group identified by the tra
 
 Implemented events:
 
-- `LocationUpdated`: sent to the token group after a successful owner update.
-- `TrackingEnded`: sent to the token group after the owner ends a tracking session.
+- `LocationUpdated`: sent to the token group after a successful owner update. The payload matches the tracking response: `token`, `latitude`, `longitude`, `updatedAt`, `isActive`, and `expiresAt`.
+- `TrackingEnded`: sent to the token group after the owner ends a tracking session through HTTP or after the MCP `stop_tracking` tool succeeds. This event currently has no payload.
 
 ## MCP Integration
 
@@ -236,7 +290,7 @@ The MCP endpoint requires JWT authentication:
 Authorization: Bearer <access_token>
 ```
 
-MCP uses HTTP transport. Clients should accept both JSON and Server-Sent Events responses, because MCP responses can use `text/event-stream`.
+MCP uses stateless HTTP transport. Clients should accept both JSON and Server-Sent Events responses, because MCP responses can use `text/event-stream`.
 
 Available tools:
 
@@ -341,6 +395,14 @@ Run the API:
 dotnet run
 ```
 
+The default development HTTP URL is:
+
+```text
+http://localhost:5258
+```
+
+The backend includes a named CORS policy for the Angular development server at `http://localhost:4200`. The policy allows credentials so the browser can store and send the HttpOnly refresh cookie.
+
 ## Running with Docker Compose
 
 The repository includes a Docker setup for running the API and PostgreSQL together.
@@ -407,6 +469,8 @@ Host=postgres
 
 Do not use `localhost` for the database host from inside the API container.
 
+The Docker API runs with `ASPNETCORE_ENVIRONMENT=Production` by default, so the refresh cookie is emitted with `Secure=true`. Use HTTPS-aware infrastructure when sending cookies to browsers in production.
+
 PostgreSQL data is stored in the named Docker volume:
 
 ```text
@@ -455,6 +519,10 @@ TrackLink
 ├── DTOs
 ├── Hubs
 │   └── TrackingHub.cs
+├── Mcp
+│   └── Responses
+├── McpTools
+│   └── TrackingTools.cs
 ├── Migrations
 ├── Models
 ├── Services
@@ -470,6 +538,7 @@ TrackLink
 ## Security Notes
 
 - Passwords are hashed before storage.
+- Refresh tokens are delivered only through an HttpOnly cookie and are not exposed in response bodies.
 - Refresh tokens are stored as SHA-256 hashes, not raw tokens.
 - JWT Bearer authentication protects user-specific and mutation endpoints.
 - Tracking mutations require ownership validation.
