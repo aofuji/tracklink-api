@@ -487,6 +487,4 @@ Possible future work:
 - PostgreSQL-backed integration tests with Testcontainers
 - Frontend application
 - Map visualization
-- MCP server
 - AI/agent integration
-- Deployment
