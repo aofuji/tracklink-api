@@ -67,8 +67,6 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseStaticFiles();
-
 app.MapControllers();
 app.MapHub<TrackingHub>("/hubs/tracking");
 app.MapMcp("/mcp")
